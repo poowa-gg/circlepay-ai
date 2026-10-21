@@ -1,3 +1,4 @@
+import { getSessionUserId } from "@/lib/session";
 import { NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import { asc, eq } from "drizzle-orm";
@@ -37,6 +38,14 @@ export async function POST(request: Request) {
   const question =
     typeof body.question === "string" ? body.question.trim() : "";
 
+      const userId = await getSessionUserId();
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Sign in to use the AI Treasurer." },
+      { status: 401 }
+    );
+  }
   const uuidPattern =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

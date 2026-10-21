@@ -1,3 +1,4 @@
+import { getSessionUserId } from "@/lib/session";
 import { NextResponse } from "next/server";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -16,6 +17,14 @@ export async function GET(
   { params }: { params: Promise<{ circleId: string }> }
 ) {
   const { circleId } = await params;
+    const userId = await getSessionUserId();
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Sign in to view this ledger." },
+      { status: 401 }
+    );
+  }
 
   if (!uuidPattern.test(circleId)) {
     return NextResponse.json(

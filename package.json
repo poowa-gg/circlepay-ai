@@ -11,10 +11,12 @@
   "dependencies": {
     "@bryntum/scheduler": "npm:@bryntum/scheduler-trial@^7.3.7",
     "@google/genai": "^2.30.0",
+    "@paypal/paypal-server-sdk": "^2.5.0",
     "ag-grid-community": "^36.2.0",
     "ag-grid-react": "^36.2.0",
     "dotenv": "^18.0.8",
     "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.13",
     "next": "16.4.2",
     "pg": "^8.23.1",
     "react": "19.3.0",

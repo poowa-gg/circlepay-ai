@@ -1,3 +1,4 @@
+import { getSessionUserId } from "@/lib/session";
 import { NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
@@ -52,6 +53,15 @@ export async function POST(
   request: Request,
   { params }: Context
 ) {
+  const userId = await getSessionUserId();
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Sign in to manage this circle." },
+      { status: 401 }
+    );
+  }
+
   try {
     const { circleId } = await params;
 
@@ -96,7 +106,6 @@ export async function POST(
     }
 
     const result = await db.transaction(async (tx) => {
-      // Serialize cycle generation for this circle.
       const [circle] = await tx
         .select({
           id: circles.id,
@@ -211,9 +220,7 @@ export async function POST(
       );
     }
 
-    console.error(
-      "Cycle generation failed; inspect the database schema and connection."
-    );
+    console.error("Cycle generation failed:", error);
 
     return NextResponse.json(
       { error: "Could not generate cycle contributions." },
