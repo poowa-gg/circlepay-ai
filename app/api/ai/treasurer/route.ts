@@ -103,9 +103,9 @@ export async function POST(request: Request) {
         asc(contributions.dueDate),
         asc(contributions.id)
       )
-      .limit(101);
+      .limit(21);
 
-    const selectedRows = rows.slice(0, 100);
+    const selectedRows = rows.slice(0, 20);
 
     const snapshot = {
       circle,
@@ -124,6 +124,76 @@ export async function POST(request: Request) {
       contributions: selectedRows
     };
 
+        const lowerQuestion = question.toLowerCase();
+
+    const pendingCount = selectedRows.filter(
+      (row) => row.status === "PENDING"
+    ).length;
+
+    const paidCount = selectedRows.filter(
+      (row) => row.status === "PAID"
+    ).length;
+
+    const asksPending =
+      lowerQuestion.includes("pending") ||
+      lowerQuestion.includes("unpaid") ||
+      lowerQuestion.includes("outstanding");
+
+    const asksPaid =
+      lowerQuestion.includes("paid") ||
+      lowerQuestion.includes("payment") ||
+      lowerQuestion.includes("completed");
+
+    const asksMeaning =
+      lowerQuestion.includes("what does pending mean") ||
+      lowerQuestion.includes("does pending mean");
+
+    if (asksPending) {
+      return NextResponse.json(
+        {
+          answer: `There are ${pendingCount} pending contribution records in the current snapshot. PENDING means an obligation exists; it does not mean the member has paid.`,
+          snapshotAt: snapshot.snapshotAt,
+          scope: snapshot.scope
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store"
+          }
+        }
+      );
+    }
+
+    if (asksPaid) {
+      return NextResponse.json(
+        {
+          answer: `There are ${paidCount} contribution records marked PAID in the current snapshot. This is the database status; it does not independently prove bank settlement.`,
+          snapshotAt: snapshot.snapshotAt,
+          scope: snapshot.scope
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store"
+          }
+        }
+      );
+    }
+
+    if (asksMeaning) {
+      return NextResponse.json(
+        {
+          answer:
+            "PENDING means a contribution obligation exists and has not yet been marked paid. It does not mean the member has paid.",
+          snapshotAt: snapshot.snapshotAt,
+          scope: snapshot.scope
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store"
+          }
+        }
+      );
+    }
+
     const ai = new GoogleGenAI({ apiKey });
 
     const response = await ai.models.generateContent({
@@ -134,7 +204,7 @@ export async function POST(request: Request) {
       }),
       config: {
         temperature: 0.2,
-        maxOutputTokens: 700,
+        maxOutputTokens: 180,
         systemInstruction: `
 You are CirclePay AI's read-only Treasurer.
 
@@ -153,7 +223,7 @@ Rules:
 - Identify members by payout position when names are unavailable.
 - If the snapshot is partial, say so.
 - If information is missing, say what is missing.
-- Keep answers short and helpful.
+- - Answer in 2 to 4 short sentences maximum.
 `
       }
     });
