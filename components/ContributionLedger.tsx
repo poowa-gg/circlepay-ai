@@ -1,26 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { AgGridReact } from "ag-grid-react";
-import {
-  AllCommunityModule,
-  ModuleRegistry,
-  themeQuartz,
-  type ColDef
-} from "ag-grid-community";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-ModuleRegistry.registerModules([AllCommunityModule]);
+type Cycle = {
+  id: string;
+  cycleNumber: number;
+  dueDate: string;
+};
 
 type Contribution = {
   id: string;
+  cycleId: string | null;
+  cycleNumber: number | null;
   memberId: string;
-  memberName: string;
-  payoutPosition: number;
+  payoutPosition: number | null;
   amount: string;
   currency: string;
   dueDate: string;
   status: string;
-  paidAt: string | null;
 };
 
 type LedgerResponse = {
@@ -29,291 +26,302 @@ type LedgerResponse = {
     name: string;
     currency: string;
   };
+  cycles: Cycle[];
   contributions: Contribution[];
+  summary: {
+    contributionRecords: number;
+    pendingRecords: number;
+    paidRecords: number;
+  };
 };
 
 type Props = {
   circleId: string;
 };
 
-function isRecord(
-  value: unknown
-): value is Record<string, unknown> {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-  );
-}
-
-function isContribution(value: unknown): value is Contribution {
-  if (!isRecord(value)) return false;
-
-  return (
-    typeof value.id === "string" &&
-    typeof value.memberId === "string" &&
-    typeof value.memberName === "string" &&
-    typeof value.payoutPosition === "number" &&
-    typeof value.amount === "string" &&
-    typeof value.currency === "string" &&
-    typeof value.dueDate === "string" &&
-    typeof value.status === "string" &&
-    (value.paidAt === null || typeof value.paidAt === "string")
-  );
-}
-
-function isLedgerResponse(value: unknown): value is LedgerResponse {
-  if (!isRecord(value) || !isRecord(value.circle)) {
-    return false;
-  }
-
-  return (
-    typeof value.circle.id === "string" &&
-    typeof value.circle.name === "string" &&
-    typeof value.circle.currency === "string" &&
-    Array.isArray(value.contributions) &&
-    value.contributions.every(isContribution)
-  );
-}
-
-function formatMoney(amount: string, currency: string): string {
-  const number = Number(amount);
-
-  if (!Number.isFinite(number)) {
-    return `${currency} ${amount}`;
-  }
-
-  try {
-    return new Intl.NumberFormat("en-NG", {
-      style: "currency",
-      currency
-    }).format(number);
-  } catch {
-    return `${currency} ${amount}`;
-  }
-}
-
 export default function ContributionLedger({ circleId }: Props) {
   const [data, setData] = useState<LedgerResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [selectedCycleId, setSelectedCycleId] = useState("all");
 
-  const columns = useMemo<ColDef<Contribution>[]>(
-    () => [
-      {
-        field: "memberName",
-        headerName: "Member",
-        minWidth: 190,
-        flex: 1
-      },
-      {
-        field: "payoutPosition",
-        headerName: "Payout turn",
-        width: 135
-      },
-      {
-        field: "amount",
-        headerName: "Contribution",
-        minWidth: 180,
-        valueFormatter: (params) =>
-          params.data
-            ? formatMoney(params.data.amount, params.data.currency)
-            : "",
-        // Amounts arrive as decimal strings from PostgreSQL.
-        comparator: (first: string, second: string) =>
-          Number(first) - Number(second)
-      },
-      {
-        field: "dueDate",
-        headerName: "Due date",
-        width: 150
-      },
-      {
-        field: "status",
-        headerName: "Payment status",
-        width: 165,
-        cellStyle: (params) => ({
-          fontWeight: 600,
-          color:
-            params.value === "PAID"
-              ? "#166534"
-              : params.value === "LATE"
-                ? "#b91c1c"
-                : "#92400e"
-        })
-      },
-      {
-        field: "paidAt",
-        headerName: "Payment recorded",
-        minWidth: 210,
-        valueFormatter: (params) => {
-          if (!params.value) return "Not recorded";
+  const loadLedger = useCallback(async () => {
+    setLoading(true);
+    setError("");
 
-          const date = new Date(params.value);
-
-          return Number.isNaN(date.getTime())
-            ? "Invalid date"
-            : date.toISOString();
+    try {
+      const response = await fetch(
+        `/api/circles/${encodeURIComponent(circleId)}/ledger`,
+        {
+          cache: "no-store"
         }
+      );
+
+      const body: unknown = await response.json();
+
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body)
+      ) {
+        throw new Error("The server sent an unexpected response.");
       }
-    ],
-    []
-  );
 
-  const defaultColumn = useMemo<ColDef<Contribution>>(
-    () => ({
-      sortable: true,
-      filter: true,
-      resizable: true
-    }),
-    []
-  );
+      const result = body as Record<string, unknown>;
 
-  useEffect(() => {
-    const controller = new AbortController();
-
-    async function loadLedger() {
-      setLoading(true);
-      setError("");
-      setData(null);
-
-      try {
-        const response = await fetch(
-          `/api/circles/${encodeURIComponent(circleId)}/ledger`,
-          {
-            cache: "no-store",
-            signal: controller.signal
-          }
-        );
-
-        const body: unknown = await response.json();
-
-        if (!response.ok) {
-          const message =
-            isRecord(body) && typeof body.error === "string"
-              ? body.error
-              : "Could not load the ledger.";
-
-          throw new Error(message);
-        }
-
-        if (!isLedgerResponse(body)) {
-          throw new Error("The ledger returned an unexpected data format.");
-        }
-
-        if (!controller.signal.aborted) {
-          setData(body);
-        }
-      } catch (caught: unknown) {
-        if (controller.signal.aborted) return;
-
-        setError(
-          caught instanceof Error
-            ? caught.message
+      if (!response.ok) {
+        throw new Error(
+          typeof result.error === "string"
+            ? result.error
             : "Could not load the ledger."
         );
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
       }
+
+      setData(result as unknown as LedgerResponse);
+    } catch (caught: unknown) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not load the ledger."
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [circleId]);
+
+  useEffect(() => {
+    void loadLedger();
+  }, [loadLedger]);
+
+  const visibleContributions = useMemo(() => {
+    if (!data) return [];
+
+    if (selectedCycleId === "all") {
+      return data.contributions;
     }
 
-    void loadLedger();
+    return data.contributions.filter(
+      (row) => row.cycleId === selectedCycleId
+    );
+  }, [data, selectedCycleId]);
 
-    return () => controller.abort();
-  }, [circleId, refreshKey]);
+  const selectedCycle = useMemo(() => {
+    if (!data || selectedCycleId === "all") return null;
 
-  const rows = data?.contributions ?? [];
+    return data.cycles.find(
+      (cycle) => cycle.id === selectedCycleId
+    );
+  }, [data, selectedCycleId]);
 
-  const paidCount = rows.filter(
-    (row) => row.status === "PAID"
-  ).length;
+  if (loading && !data) {
+    return (
+      <section className="rounded-2xl border border-slate-200 bg-white p-6">
+        <p role="status" className="text-sm text-slate-600">
+          Loading contribution ledger…
+        </p>
+      </section>
+    );
+  }
 
-  return (
-    <section className="space-y-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-sm font-medium text-blue-700">
-            CirclePay AI · Local prototype
-          </p>
+  if (error) {
+    return (
+      <section className="rounded-2xl border border-red-200 bg-red-50 p-6">
+        <h2 className="text-lg font-semibold text-red-900">
+          Ledger unavailable
+        </h2>
 
-          <h1 className="mt-2 text-3xl font-bold text-slate-900">
-            {data?.circle.name ?? "Contribution ledger"}
-          </h1>
-
-          <p className="mt-2 text-sm text-slate-600">
-            Contribution obligations and recorded payment status.
-          </p>
-        </div>
+        <p role="alert" className="mt-2 text-sm text-red-800">
+          {error}
+        </p>
 
         <button
           type="button"
-          disabled={loading}
-          onClick={() => setRefreshKey((current) => current + 1)}
-          className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:cursor-wait disabled:opacity-60"
+          onClick={() => void loadLedger()}
+          className="mt-4 rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white"
         >
-          {loading ? "Loading…" : "Refresh ledger"}
+          Try again
         </button>
-      </header>
+      </section>
+    );
+  }
 
-      {loading && (
-        <p role="status" className="text-sm text-slate-600">
-          Loading contribution records…
+  if (!data) return null;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">
+            {data.circle.name}
+          </h2>
+
+          <p className="mt-1 text-sm text-slate-600">
+            Contribution ledger · {data.circle.currency}
+          </p>
+        </div>
+
+        <div className="w-full sm:w-64">
+          <label
+            htmlFor="cycle-filter"
+            className="block text-sm font-medium text-slate-800"
+          >
+            Cycle
+          </label>
+
+          <select
+            id="cycle-filter"
+            value={selectedCycleId}
+            onChange={(event) =>
+              setSelectedCycleId(event.target.value)
+            }
+            className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-600"
+          >
+            <option value="all">All cycles</option>
+
+            {data.cycles.map((cycle) => (
+              <option key={cycle.id} value={cycle.id}>
+                Cycle {cycle.cycleNumber} · due{" "}
+                {new Date(cycle.dueDate).toLocaleDateString()}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-3">
+        <div className="rounded-xl bg-slate-50 p-4">
+          <p className="text-xs font-medium text-slate-600">
+            Contribution records
+          </p>
+
+          <p className="mt-1 text-2xl font-bold text-slate-900">
+            {selectedCycleId === "all"
+              ? data.summary.contributionRecords
+              : visibleContributions.length}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-amber-50 p-4">
+          <p className="text-xs font-medium text-amber-800">
+            Pending records
+          </p>
+
+          <p className="mt-1 text-2xl font-bold text-amber-900">
+            {selectedCycleId === "all"
+              ? data.summary.pendingRecords
+              : visibleContributions.filter(
+                  (row) => row.status === "PENDING"
+                ).length}
+          </p>
+        </div>
+
+        <div className="rounded-xl bg-green-50 p-4">
+          <p className="text-xs font-medium text-green-800">
+            Paid records
+          </p>
+
+          <p className="mt-1 text-2xl font-bold text-green-900">
+            {selectedCycleId === "all"
+              ? data.summary.paidRecords
+              : visibleContributions.filter(
+                  (row) => row.status === "PAID"
+                ).length}
+          </p>
+        </div>
+      </div>
+
+      {selectedCycle ? (
+        <p className="mt-4 rounded-lg bg-blue-50 p-3 text-sm text-blue-900">
+          Showing Cycle {selectedCycle.cycleNumber}, due{" "}
+          {new Date(selectedCycle.dueDate).toLocaleDateString()}.
+        </p>
+      ) : (
+        <p className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
+          Showing all cycles. These totals count contribution records, not
+          unique members or one payout pot.
         </p>
       )}
 
-      {error && (
-        <div
-          role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800"
-        >
-          {error}
-        </div>
-      )}
+      <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+        <table className="min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                Cycle
+              </th>
 
-      {data && !loading && (
-        <>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <p className="text-sm text-slate-600">Contribution records</p>
-              <p className="mt-1 text-2xl font-bold">{rows.length}</p>
-            </div>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                Member
+              </th>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <p className="text-sm text-slate-600">Marked paid</p>
-              <p className="mt-1 text-2xl font-bold">{paidCount}</p>
-            </div>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                Amount
+              </th>
 
-            <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <p className="text-sm text-slate-600">Circle currency</p>
-              <p className="mt-1 text-2xl font-bold">
-                {data.circle.currency}
-              </p>
-            </div>
-          </div>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                Due date
+              </th>
 
-          <div
-            className="overflow-hidden rounded-xl border border-slate-200 bg-white"
-            style={{ height: 440 }}
-          >
-            <AgGridReact<Contribution>
-              theme={themeQuartz}
-              rowData={rows}
-              columnDefs={columns}
-              defaultColDef={defaultColumn}
-              getRowId={(params) => params.data.id}
-              overlayNoRowsTemplate="No contribution records yet."
-            />
-          </div>
+              <th className="px-4 py-3 text-left font-semibold text-slate-700">
+                Status
+              </th>
+            </tr>
+          </thead>
 
-          <p className="text-xs text-slate-600">
-            PENDING means an obligation exists. It does not mean payment
-            has been collected. This page cannot approve or send payouts.
-          </p>
-        </>
-      )}
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {visibleContributions.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-4 py-6 text-center text-slate-600"
+                >
+                  No contribution records for this selection.
+                </td>
+              </tr>
+            ) : (
+              visibleContributions.map((row) => (
+                <tr key={row.id}>
+                  <td className="px-4 py-3 text-slate-800">
+                    {row.cycleNumber ?? "Legacy"}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-800">
+                    Member {row.payoutPosition ?? "—"}
+                  </td>
+
+                  <td className="px-4 py-3 font-medium text-slate-900">
+                    {row.amount} {row.currency}
+                  </td>
+
+                  <td className="px-4 py-3 text-slate-700">
+                    {new Date(row.dueDate).toLocaleDateString()}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span
+                      className={
+                        row.status === "PAID"
+                          ? "rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-800"
+                          : "rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800"
+                      }
+                    >
+                      {row.status}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void loadLedger()}
+        className="mt-5 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+      >
+        Refresh ledger
+      </button>
     </section>
   );
 }

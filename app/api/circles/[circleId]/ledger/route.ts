@@ -5,30 +5,26 @@ import {
   circles,
   circleMembers,
   contributions,
-  users
+  cycles
 } from "@/db/schema";
 
-type Context = {
-  params: Promise<{ circleId: string }>;
-};
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(
   _request: Request,
-  { params }: Context
+  { params }: { params: Promise<{ circleId: string }> }
 ) {
+  const { circleId } = await params;
+
+  if (!uuidPattern.test(circleId)) {
+    return NextResponse.json(
+      { error: "A valid circle ID is required." },
+      { status: 400 }
+    );
+  }
+
   try {
-    const { circleId } = await params;
-
-    const uuidPattern =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-    if (!uuidPattern.test(circleId)) {
-      return NextResponse.json(
-        { error: "A valid circle ID is required." },
-        { status: 400 }
-      );
-    }
-
     const [circle] = await db
       .select({
         id: circles.id,
@@ -46,48 +42,70 @@ export async function GET(
       );
     }
 
-    const rows = await db
+    const cycleRows = await db
+      .select({
+        id: cycles.id,
+        cycleNumber: cycles.cycleNumber,
+        dueDate: cycles.dueDate
+      })
+      .from(cycles)
+      .where(eq(cycles.circleId, circleId))
+      .orderBy(asc(cycles.cycleNumber));
+
+    const contributionRows = await db
       .select({
         id: contributions.id,
-        memberId: circleMembers.id,
-        memberName: users.fullName,
+        cycleId: contributions.cycleId,
+        cycleNumber: cycles.cycleNumber,
+        memberId: contributions.memberId,
         payoutPosition: circleMembers.payoutPosition,
         amount: contributions.amount,
         currency: contributions.currency,
         dueDate: contributions.dueDate,
-        status: contributions.status,
-        paidAt: contributions.paidAt
+        status: contributions.status
       })
       .from(contributions)
       .innerJoin(
         circleMembers,
         eq(contributions.memberId, circleMembers.id)
       )
-      .innerJoin(
-        users,
-        eq(circleMembers.userId, users.id)
+      .leftJoin(
+        cycles,
+        eq(contributions.cycleId, cycles.id)
       )
       .where(eq(circleMembers.circleId, circleId))
       .orderBy(
         asc(contributions.dueDate),
-        asc(circleMembers.payoutPosition),
         asc(contributions.id)
       );
+
+    const pendingRecords = contributionRows.filter(
+      (row) => row.status === "PENDING"
+    ).length;
+
+    const paidRecords = contributionRows.filter(
+      (row) => row.status === "PAID"
+    ).length;
 
     return NextResponse.json(
       {
         circle,
-        contributions: rows
+        cycles: cycleRows,
+        contributions: contributionRows,
+        summary: {
+          contributionRecords: contributionRows.length,
+          pendingRecords,
+          paidRecords
+        }
       },
       {
-        status: 200,
         headers: {
           "Cache-Control": "no-store"
         }
       }
     );
-  } catch {
-    console.error("Ledger read failed");
+  } catch (error: unknown) {
+    console.error("Ledger request failed:", error);
 
     return NextResponse.json(
       { error: "Could not load the contribution ledger." },
