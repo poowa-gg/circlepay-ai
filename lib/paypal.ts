@@ -7,6 +7,7 @@ type PayPalTokenResponse = {
 type PayPalOrderResponse = {
   id?: string;
   status?: string;
+  message?: string;
 };
 
 let cachedToken: string | null = null;
@@ -62,6 +63,11 @@ async function getAccessToken(): Promise<string> {
   const result = body as PayPalTokenResponse;
 
   if (!response.ok || typeof result.access_token !== "string") {
+    console.error(
+      "PayPal token request failed:",
+      JSON.stringify(body, null, 2)
+    );
+
     throw new Error("PayPal did not return an access token.");
   }
 
@@ -75,7 +81,12 @@ export async function createPayPalOrder(input: {
   contributionId: string;
   amount: string;
   currency: string;
-}): Promise<string> {
+  returnUrl: string;
+  cancelUrl: string;
+}): Promise<{
+  orderId: string;
+  approvalUrl: string;
+}> {
   const accessToken = await getAccessToken();
 
   const response = await fetch(
@@ -97,7 +108,16 @@ export async function createPayPalOrder(input: {
               value: input.amount
             }
           }
-        ]
+        ],
+        payment_source: {
+          paypal: {
+            experience_context: {
+              user_action: "PAY_NOW",
+              return_url: input.returnUrl,
+              cancel_url: input.cancelUrl
+            }
+          }
+        }
       })
     }
   );
@@ -112,15 +132,36 @@ export async function createPayPalOrder(input: {
     throw new Error("PayPal returned an unreadable order response.");
   }
 
-  const result = body as PayPalOrderResponse;
+  const result = body as PayPalOrderResponse & {
+    links?: Array<{
+      rel?: string;
+      href?: string;
+    }>;
+  };
 
-  if (!response.ok || typeof result.id !== "string") {
-    throw new Error("PayPal did not create the order.");
+    const approvalUrl = result.links?.find(
+    (link) =>
+      link.rel === "approve" ||
+      link.rel === "payer-action"
+  )?.href;
+  if (
+    !response.ok ||
+    typeof result.id !== "string" ||
+    typeof approvalUrl !== "string"
+  ) {
+    console.error(
+      "PayPal create-order failed:",
+      JSON.stringify(body, null, 2)
+    );
+
+    throw new Error("PayPal did not create an approvable order.");
   }
 
-  return result.id;
+  return {
+    orderId: result.id,
+    approvalUrl
+  };
 }
-
 export async function capturePayPalOrder(input: {
   orderId: string;
 }): Promise<string> {
@@ -152,11 +193,17 @@ export async function capturePayPalOrder(input: {
   const result = body as PayPalOrderResponse;
 
   if (!response.ok || result.status !== "COMPLETED") {
-    throw new Error(
-      `PayPal did not complete the payment. Status: ${
-        result.status ?? "unknown"
-      }.`
+    console.error(
+      "PayPal capture-order failed:",
+      JSON.stringify(body, null, 2)
     );
+
+    const message =
+      typeof result.message === "string"
+        ? result.message
+        : "PayPal did not complete the payment.";
+
+    throw new Error(message);
   }
 
   return result.status;

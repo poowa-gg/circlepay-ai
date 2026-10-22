@@ -6,7 +6,7 @@ import ContributionLedger from "@/components/ContributionLedger";
 
 export const instant = false;
 
-const circleId = "705e8d90-be6e-45ef-92fc-1e68a416d77e";
+const circleId = "5f377bf9-41cf-4a4b-ae0f-42392d573a12";
 
 export default async function LedgerPage() {
   const userId = await getSessionUserId();

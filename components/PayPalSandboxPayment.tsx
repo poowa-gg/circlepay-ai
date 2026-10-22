@@ -77,45 +77,11 @@ export default function PayPalSandboxPayment({
         throw new Error("PayPal order ID was missing.");
       }
 
-      const captureResponse = await fetch(
-        "/api/payments/capture-order",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
-          body: JSON.stringify({
-            contributionId: selectedId,
-            orderId: createResult.orderId
-          })
-        }
-      );
-
-      const captureBody: unknown = await captureResponse.json();
-
-      if (
-        typeof captureBody !== "object" ||
-        captureBody === null ||
-        Array.isArray(captureBody)
-      ) {
-        throw new Error("Unexpected server response.");
+            if (typeof createResult.approvalUrl !== "string") {
+        throw new Error("PayPal did not return an approval link.");
       }
 
-      const captureResult = captureBody as Record<string, unknown>;
-
-      if (!captureResponse.ok) {
-        throw new Error(
-          typeof captureResult.error === "string"
-            ? captureResult.error
-            : "Could not complete PayPal payment."
-        );
-      }
-
-      setMessage(
-        "PayPal Sandbox payment completed. The contribution is now marked PAID."
-      );
-
-      onPaid();
+      window.location.href = createResult.approvalUrl;
     } catch (caught: unknown) {
       setError(
         caught instanceof Error

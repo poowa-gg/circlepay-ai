@@ -76,13 +76,19 @@ export async function POST(request: Request) {
       );
     }
 
-    const orderId = await createPayPalOrder({
+        const origin = new URL(request.url).origin;
+
+    const result = await createPayPalOrder({
       contributionId: contribution.id,
       amount: contribution.amount,
-      currency: contribution.currency
+      currency: contribution.currency,
+      returnUrl: `${origin}/payment/return?contributionId=${encodeURIComponent(
+        contribution.id
+      )}`,
+      cancelUrl: `${origin}/ledger?payment=cancelled`
     });
 
-    return NextResponse.json({ orderId });
+    return NextResponse.json(result);
   } catch (error: unknown) {
     console.error("PayPal order creation failed:", error);
 

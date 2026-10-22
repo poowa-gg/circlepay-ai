@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import PayPalSandboxPayment from "@/components/PayPalSandboxPayment";
 
 type Cycle = {
   id: string;
@@ -322,6 +323,13 @@ export default function ContributionLedger({ circleId }: Props) {
       >
         Refresh ledger
       </button>
+
+      <div className="mt-8">
+        <PayPalSandboxPayment
+          contributions={visibleContributions}
+          onPaid={() => void loadLedger()}
+        />
+      </div>
     </section>
   );
 }
