@@ -12,6 +12,10 @@ function normalizeText(value: string): string {
   return value.trim().replace(/\s+/g, " ");
 }
 
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
 export async function POST(request: Request) {
   let body: unknown;
 
@@ -19,7 +23,7 @@ export async function POST(request: Request) {
     body = await request.json();
   } catch {
     return NextResponse.json(
-      { error: "Send a valid JSON body." },
+      { error: "Send a valid JSON request." },
       { status: 400 }
     );
   }
@@ -30,29 +34,29 @@ export async function POST(request: Request) {
     Array.isArray(body)
   ) {
     return NextResponse.json(
-      { error: "Request body must be an object." },
+      { error: "Request body must be a JSON object." },
       { status: 400 }
     );
   }
 
-  const result = body as Record<string, unknown>;
+  const values = body as Record<string, unknown>;
 
   const email =
-    typeof result.email === "string"
-      ? normalizeEmail(result.email)
+    typeof values.email === "string"
+      ? normalizeEmail(values.email)
       : "";
 
   const fullName =
-    typeof result.fullName === "string"
-      ? normalizeText(result.fullName)
+    typeof values.fullName === "string"
+      ? normalizeText(values.fullName)
       : "";
 
   const country =
-    typeof result.country === "string"
-      ? normalizeText(result.country)
+    typeof values.country === "string"
+      ? normalizeText(values.country)
       : "";
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (!isValidEmail(email)) {
     return NextResponse.json(
       { error: "Enter a valid email address." },
       { status: 400 }
@@ -97,19 +101,29 @@ export async function POST(request: Request) {
 
     await createSession(userId);
 
-    return NextResponse.json({
-      user: {
-        id: userId,
-        email,
-        fullName,
-        country
+    return NextResponse.json(
+      {
+        user: {
+          id: userId,
+          email,
+          fullName,
+          country
+        }
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store"
+        }
       }
-    });
+    );
   } catch (error: unknown) {
     console.error("Login failed:", error);
 
     return NextResponse.json(
-      { error: "Could not sign in. Please try again." },
+      {
+        error:
+          "Could not sign in. Please check your details and try again."
+      },
       { status: 500 }
     );
   }
